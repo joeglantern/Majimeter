@@ -15,7 +15,9 @@ export const api = axios.create({
   baseURL: BASE_URL,
   timeout: 15000,
   headers: {
-    'Content-Type': 'application/json',
+    // We let Axios handle Content-Type dynamically based on request data.
+    // For objects, it defaults to application/json. 
+    // For FormData, it correctly sets multipart/form-data with boundaries.
   },
 });
 

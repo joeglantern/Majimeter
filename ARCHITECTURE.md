@@ -26,63 +26,50 @@
 │          │               │                  │                    │
 │          └───────────────┴──────────────────┘                   │
 │                          │  MQTT publish                         │
-│                 ┌────────▼──────────┐                           │
-│                 │  Mosquitto Broker  │                           │
-│                 └────────┬──────────┘                           │
+│                 ┌────────▼───────────┐                          │
+│                 │   MQTT Broker      │                           │
+│                 │  (IoT team-owned;  │                           │
+│                 │   HiveMQ in dev)   │                           │
+│                 └────────┬───────────┘                          │
 └──────────────────────────┼───────────────────────────────────────┘
-                           │ MQTT subscribe (IoT Ingestion Service)
+                           │ MQTT subscribe (port 1883/8883)
+                           │ direct connection — bypasses NGINX
                            ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                        NGINX GATEWAY                             │
-│              (SSL, Rate Limiting, Reverse Proxy)                 │
-└────────────────────────────┬─────────────────────────────────────┘
-                             │
-          ┌──────────────────┴──────────────────┐
-          ▼                                     ▼
-┌──────────────────┐                 ┌──────────────────────────┐
-│   REST API       │                 │  Socket.IO Server        │
-│   (Fastify)      │                 │  (@fastify/socket.io)    │
-│                  │                 │                          │
-│  /auth           │                 │  ns: /sensors            │
-│  /users          │                 │    rooms: waterPoint:{id}│
-│  /reports        │                 │  ns: /alerts             │
-│  /water-points   │                 │    rooms: severity:{lvl} │
-│  /sensors        │                 │  ns: /map                │
-│  /analytics      │                 │    rooms: area:{bbox}    │
-│  /notifications  │                 └────────────┬─────────────┘
-└────────┬─────────┘                              │
-         │                                            │
-         └──────────────────┬─────────────────────────┘
-                            │
-┌───────────────────────────▼──────────────────────────────────────┐
-│                        SERVICE LAYER                             │
-│                                                                  │
-│  ┌─────────────────┐  ┌──────────────────┐  ┌─────────────────┐ │
-│  │  Auth Service   │  │  Report Service  │  │  IoT Service    │ │
-│  │  - JWT tokens   │  │  - CRUD reports  │  │  - Ingest data  │ │
-│  │  - Roles/perms  │  │  - Geo-tagging   │  │  - Anomaly det. │ │
-│  │  - Refresh tok. │  │  - Image upload  │  │  - Aggregation  │ │
-│  └─────────────────┘  └──────────────────┘  └─────────────────┘ │
-│                                                                  │
-│  ┌─────────────────┐  ┌──────────────────┐  ┌─────────────────┐ │
-│  │  Notif Service  │  │  Map Service     │  │Analytics Service│ │
-│  │  - FCM push     │  │  - Water points  │  │  - Usage trends │ │
-│  │  - Alert rules  │  │  - Issue overlay │  │  - Aggregations │ │
-│  │  - Scheduling   │  │  - Clustering    │  │  - Exports      │ │
-│  └─────────────────┘  └──────────────────┘  └─────────────────┘ │
-└──────────────────────────────┬───────────────────────────────────┘
-                               │
-          ┌────────────────────┼─────────────────────┐
-          ▼                    ▼                     ▼
-┌──────────────────┐  ┌─────────────┐   ┌────────────────────────┐
-│  Supabase        │  │   Redis     │   │  External Services     │
-│  (PostgreSQL)    │  │             │   │                        │
-│                  │  │  - Pub/Sub  │   │  - FCM (push notifs)   │
-│  - users         │  │  - Sessions │   │  - Supabase Storage    │
-│  - reports       │  │  - Rate lim │   │    (report images)     │
-│  - water_points  │  │  - Sio relay│   │  - MapBox/Google Maps  │
-│  - sensor_reads  │  └─────────────┘   └────────────────────────┘
-│  - alerts        │
+          ┌────────────────────────────────────────┐
+          │      FASTIFY SERVER (single process)   │
+          │                                        │
+          │  ┌─────────────────────────────────┐  │
+          │  │  plugins/mqtt.ts                │  │
+          │  │  MQTT subscriber → ingest →     │  │
+          │  │  anomaly check → Redis publish  │  │
+          │  └─────────────────────────────────┘  │
+          │                                        │
+          │◄──── HTTP/WS ── NGINX GATEWAY ────────►│
+          │              (SSL, Rate Limit,         │
+          │               Reverse Proxy)           │
+          │                                        │
+          │  REST API routes:                      │
+          │    /auth  /users  /water-points        │
+          │    /reports  /ingest  /alerts          │
+          │    /analytics  /notifications          │
+          │                                        │
+          │  Socket.IO (@fastify/socket.io):       │
+          │    ns: /sensors  rooms: waterPoint:{id}│
+          │    ns: /alerts   rooms: severity:{lvl} │
+          │    ns: /map      rooms: bbox:{lat}:{lng}│
+          └────────────────┬───────────────────────┘
+                           │
+          ┌────────────────┼──────────────────────┐
+          ▼                ▼                      ▼
+┌──────────────────┐  ┌─────────────┐  ┌─────────────────────────┐
+│  Supabase        │  │   Redis     │  │  External Services      │
+│  (PostgreSQL)    │  │  (Upstash)  │  │                         │
+│                  │  │             │  │  - FCM (push notifs)    │
+│  - users         │  │  - Pub/Sub  │  │  - Supabase Storage     │
+│  - reports       │  │  - Sessions │  │    (report images)      │
+│  - water_points  │  │  - Rate lim │  │  - react-native-maps    │
+│  - sensor_reads  │  │  - Sio relay│  │    (Apple Maps / Google)│
+│  - alerts        │  └─────────────┘  └─────────────────────────┘
 │  - notifications │
 └──────────────────┘
 
@@ -131,7 +118,7 @@
 | created_at | TIMESTAMPTZ | |
 
 ### `sensor_readings` (regular PostgreSQL table, indexed on `time DESC`)
-> TimescaleDB is not available on Supabase. Use native `date_trunc()` for aggregations and composite indexes for efficient time-range queries. Add PostgreSQL declarative partitioning (`PARTITION BY RANGE (time)`) when data volume warrants it.
+> TimescaleDB is not available on Supabase. Native `date_trunc()` is used for aggregations with composite indexes for efficient time-range queries. PostgreSQL declarative partitioning (`PARTITION BY RANGE (time)`) can be added when data volume warrants it.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -204,8 +191,10 @@ POST   /api/v1/auth/reset-password
 GET    /api/v1/users/me
 PATCH  /api/v1/users/me
 PUT    /api/v1/users/me/fcm-token
-GET    /api/v1/users/:id          (admin)
-PATCH  /api/v1/users/:id          (admin)
+DELETE /api/v1/users/me
+GET    /api/v1/users                      (admin)
+GET    /api/v1/users/:id                  (admin)
+PATCH  /api/v1/users/:id                  (admin)
 ```
 
 ### Water Points
@@ -300,8 +289,9 @@ Rooms: `severity:critical`, `severity:warning`, `severity:info` — clients can 
 | server → client | `report:new` | new community report with geo coords |
 | server → client | `report:updated` | status/upvote change on existing report |
 | server → client | `report:resolved` | report closed |
-| server → client | `waterpoint:status` | `{ waterPointId, status, updatedAt }` |
 | server → client | `alert:map` | geo-located alert for map pin overlay |
+
+> `waterpoint:status` was planned but is not yet published — no `map:waterpoints` Redis channel is wired up in the current backend.
 
 Rooms: dynamic bbox rooms so high-traffic areas don't flood unrelated clients.
 
@@ -321,7 +311,7 @@ Mosquitto Broker
 IoT Ingestion Service (Fastify plugin)
    │
    ├── Validate & normalize payload
-   ├── Write to TimescaleDB (sensor_readings hypertable)
+   ├── Write to sensor_readings (PostgreSQL, indexed on time DESC)
    ├── Run anomaly checks (compare against thresholds)
    │      ├── If anomaly → create alert → publish to Redis pub/sub
    │      │      ├── Socket.IO emits `alert:new` on /alerts namespace
@@ -350,7 +340,7 @@ IoT Ingestion Service (Fastify plugin)
 - Sensor history supports `interval` param (e.g., `1h`, `6h`, `1d`) to return aggregated points instead of raw readings
 - Image uploads compressed before storage; thumbnails served separately
 - Socket.IO messages use compact JSON payloads; volatile emits used for high-frequency sensor readings (dropped if client is slow, no buffering)
-- Offline-capable mobile app with local SQLite queue for report submission
+- Offline-capable mobile app with local SQLite queue for report submission *(planned — not yet implemented)*
 
 ---
 
@@ -379,29 +369,32 @@ External APIs
 ```
 majimeter-backend/
 ├── src/
-│   ├── plugins/           # Fastify plugins (db, redis, auth, mqtt)
+│   ├── plugins/           # Fastify plugins: db, redis, auth, mqtt, socketio, storage
+│   │   ├── auth.ts        # JWT sign/verify, authenticate & authorize decorators
+│   │   ├── db.ts          # postgres.js client
+│   │   ├── redis.ts       # Upstash Redis client
+│   │   ├── mqtt.ts        # MQTT broker connection
+│   │   ├── socketio.ts    # Socket.IO server + /sensors, /alerts, /map namespaces
+│   │   └── storage.ts     # Supabase Storage client
 │   ├── routes/
 │   │   ├── auth/
 │   │   ├── users/
 │   │   ├── water-points/
 │   │   ├── reports/
-│   │   ├── sensors/
+│   │   ├── ingest/        # IoT sensor data ingestion (POST /ingest/sensor)
 │   │   ├── alerts/
 │   │   ├── analytics/
 │   │   └── notifications/
-│   ├── services/          # Business logic (auth, iot, alerts, notifs)
-│   ├── workers/           # Background jobs (alert engine, notif dispatch)
-│   ├── schemas/           # Zod/JSON Schema validation
+│   ├── services/          # Business logic (auth, reports, waterPoints, alerts, notifications, anomaly)
+│   ├── schemas/           # JSON Schema validation (auth, reports, users, waterPoints)
 │   ├── db/
-│   │   ├── migrations/
-│   │   └── queries/
-│   ├── socketio/          # Socket.IO namespace handlers (sensors, alerts, map)
-│   ├── mqtt/              # MQTT subscriber & ingestion
-│   ├── utils/
+│   │   ├── migrate.ts     # Migration runner
+│   │   └── migrations/    # SQL migration files
+│   ├── mqtt/
+│   │   └── subscriber.ts  # MQTT topic subscriber + ingest handler
+│   ├── types/             # Shared TypeScript types (db row types, enums)
+│   ├── utils/             # Response helpers, error factory
 │   └── app.ts             # Fastify instance + plugin registration
-├── tests/
 ├── .env.example
-├── docker-compose.yml
-├── Dockerfile
 └── package.json
 ```

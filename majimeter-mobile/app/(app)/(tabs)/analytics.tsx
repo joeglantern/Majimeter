@@ -1,29 +1,30 @@
 // app/(app)/(tabs)/analytics.tsx
-// Analytics/Insights Screen — Screen 7 (Admin Only)
-// High-level system health and usage trends.
-// Bubbly visual indicators and trend cards.
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
-  Pressable,
+  RefreshControl,
   ActivityIndicator,
   Dimensions,
 } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ChartBar,
-  TrendUp,
-  TrendDown,
-  Water,
+  Drop,
   Warning,
-  Users,
-  CaretRight,
+  BellSimpleRinging,
+  CheckSquare,
+  Activity,
+  WaveTriangle,
+  ArrowDown,
+  ArrowsLeftRight,
+  WaveSine,
+  ShieldWarning,
 } from 'phosphor-react-native';
-import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/hooks/useTheme';
 import { Colors, Shadows, Radii, Typography, Spacing } from '@/constants/Theme';
 import { api } from '@/lib/api';
@@ -32,125 +33,219 @@ const { width } = Dimensions.get('window');
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-interface Metric {
-  label: string;
-  value: string | number;
-  trend: number; // percentage
-  icon: any;
-  color: string;
+interface Summary {
+  active_water_points: number;
+  total_water_points: number;
+  open_reports: number;
+  active_alerts: number;
+  critical_alerts: number;
+  readings_today: number;
 }
 
+interface Anomaly {
+  id: string;
+  water_point_id: string;
+  water_point_name: string;
+  type: string;
+  severity: 'info' | 'warning' | 'critical';
+  message: string;
+  triggered_at: string;
+  acknowledged_at: string | null;
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+function timeAgo(iso: string): string {
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+const ANOMALY_TYPE_LABELS: Record<string, string> = {
+  low_level:     'Low Water Level',
+  high_pressure: 'High Pressure',
+  low_pressure:  'Low Pressure',
+  no_flow:       'No Flow Detected',
+  leak_detected: 'Leak Detected',
+};
+
+const ANOMALY_ICONS: Record<string, any> = {
+  low_level:     ArrowDown,
+  high_pressure: ArrowsLeftRight,
+  low_pressure:  ArrowsLeftRight,
+  no_flow:       WaveSine,
+  leak_detected: Drop,
+};
+
+// ── Main Screen ────────────────────────────────────────────────────────────────
+
 export default function AnalyticsScreen() {
-  const { isAdmin } = useAuth();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  useEffect(() => {
-    // Simulate data loading for the UI demonstration
-    const timer = setTimeout(() => setIsLoading(false), 800);
-    return () => clearTimeout(timer);
+  const fetchData = useCallback(async () => {
+    try {
+      const [sumRes, anomRes] = await Promise.all([
+        api.get('/analytics/summary'),
+        api.get('/analytics/anomalies', { params: { limit: 10 } }),
+      ]);
+      setSummary(sumRes.data.data ?? null);
+      setAnomalies(anomRes.data.data ?? []);
+    } catch (err) {
+      console.warn('Analytics fetch error:', err);
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
   }, []);
 
-  if (!isAdmin) {
-    return (
-      <View style={[styles.center, { backgroundColor: colors.background }]}>
-        <Warning size={48} color={colors.textMuted} />
-        <Text style={[styles.deniedText, { color: colors.textPrimary }]}>Access Restricted</Text>
-        <Text style={[styles.deniedSub, { color: colors.textSecondary }]}>This screen is for administrators only.</Text>
-      </View>
-    );
-  }
+  useEffect(() => { fetchData(); }, []);
+
+  const waterPointHealth = summary
+    ? Math.round((summary.active_water_points / Math.max(summary.total_water_points, 1)) * 100)
+    : 0;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView
-        contentContainerStyle={{ paddingTop: insets.top + Spacing.md, paddingBottom: 120 }}
+        contentContainerStyle={{ paddingTop: insets.top + Spacing.md, paddingBottom: insets.bottom + 120 }}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={() => { setIsRefreshing(true); fetchData(); }}
+            tintColor={Colors.primary}
+          />
+        }
       >
-        {/* ── Header ────────────────────────────────────────────────── */}
+        {/* ── Header ─────────────────────────────────────────────── */}
         <View style={styles.header}>
           <Text style={[styles.title, { color: colors.textPrimary }]}>Insights</Text>
-          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Network trends for the last 30 days</Text>
+          <Text style={[styles.subtitle, { color: colors.textMuted }]}>System overview</Text>
         </View>
 
         {isLoading ? (
-          <ActivityIndicator color={Colors.primary} style={{ marginTop: 100 }} />
+          <View style={styles.loadingCenter}>
+            <ActivityIndicator color={Colors.primary} size="large" />
+          </View>
         ) : (
           <>
-            {/* ── Main KPIs ────────────────────────────────────────────── */}
-            <View style={styles.metricsRow}>
-              <MetricCard
-                label="Total Usage"
-                value="1.2M L"
-                trend={12}
-                icon={Water}
-                color={Colors.water}
-                colors={colors}
-              />
-              <MetricCard
-                label="New Users"
-                value="452"
-                trend={-5}
-                icon={Users}
-                color={Colors.primary}
-                colors={colors}
-              />
-            </View>
+            {/* ── Summary KPIs ──────────────────────────────────────── */}
+            <Animated.View entering={FadeInDown.delay(0).springify().damping(16)}>
+              <View style={styles.kpiGrid}>
+                <KpiCard
+                  label="Active Points"
+                  value={`${summary?.active_water_points ?? 0} / ${summary?.total_water_points ?? 0}`}
+                  icon={Drop}
+                  color={Colors.water}
+                  colors={colors}
+                />
+                <KpiCard
+                  label="Open Reports"
+                  value={summary?.open_reports ?? 0}
+                  icon={ChartBar}
+                  color={Colors.critical}
+                  colors={colors}
+                  alert={!!summary?.open_reports}
+                />
+              </View>
+              <View style={styles.kpiGrid}>
+                <KpiCard
+                  label="Active Alerts"
+                  value={summary?.active_alerts ?? 0}
+                  subValue={summary?.critical_alerts ? `${summary.critical_alerts} critical` : undefined}
+                  icon={BellSimpleRinging}
+                  color={Colors.warning}
+                  colors={colors}
+                  alert={!!summary?.critical_alerts}
+                />
+                <KpiCard
+                  label="Readings Today"
+                  value={summary?.readings_today ?? 0}
+                  icon={Activity}
+                  color={Colors.primary}
+                  colors={colors}
+                />
+              </View>
+            </Animated.View>
 
-            {/* ── Trend Section ─────────────────────────────────────────── */}
-            <View style={styles.section}>
-              <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Usage Trend</Text>
-              <View style={[styles.chartPlaceholder, { backgroundColor: colors.surfaceSecondary }]}>
-                {/* Manual "Human Crafted" bar indicators */}
-                <View style={styles.chartBars}>
-                  {[40, 70, 45, 90, 65, 80, 50].map((h, i) => (
-                    <View key={i} style={styles.barWrapper}>
-                      <View style={[styles.bar, { height: h, backgroundColor: Colors.primaryLight }]} />
-                      <Text style={[styles.barLabel, { color: colors.textMuted }]}>
-                        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][i]}
-                      </Text>
-                    </View>
-                  ))}
+            {/* ── Network Health Bar ──────────────────────────────── */}
+            <Animated.View entering={FadeInDown.delay(100).springify().damping(16)}>
+              <View style={[styles.section]}>
+                <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Network Health</Text>
+                <View style={[styles.healthCard, Shadows.card, { backgroundColor: colors.surface }]}>
+                  <View style={styles.healthHeader}>
+                    <Text style={[styles.healthPct, { color: waterPointHealth >= 80 ? Colors.success : waterPointHealth >= 50 ? Colors.warning : Colors.critical }]}>
+                      {waterPointHealth}%
+                    </Text>
+                    <Text style={[styles.healthLabel, { color: colors.textSecondary }]}>
+                      {waterPointHealth >= 80 ? 'Healthy' : waterPointHealth >= 50 ? 'Degraded' : 'Critical'}
+                    </Text>
+                  </View>
+                  <View style={[styles.progressTrack, { backgroundColor: colors.surfaceSecondary }]}>
+                    <View
+                      style={[
+                        styles.progressFill,
+                        {
+                          width: `${waterPointHealth}%` as any,
+                          backgroundColor:
+                            waterPointHealth >= 80 ? Colors.success :
+                            waterPointHealth >= 50 ? Colors.warning : Colors.critical,
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text style={[styles.healthSub, { color: colors.textMuted }]}>
+                    {summary?.active_water_points ?? 0} of {summary?.total_water_points ?? 0} water points online
+                  </Text>
                 </View>
               </View>
-            </View>
+            </Animated.View>
 
-            {/* ── Reports Analytics ─────────────────────────────────────── */}
-            <View style={styles.section}>
-              <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Resolution Speed</Text>
-              <View style={[styles.speedCard, Shadows.card, { backgroundColor: colors.surface }]}>
-                <View style={styles.speedInfo}>
-                  <Text style={[styles.speedValue, { color: Colors.success }]}>4.2 hrs</Text>
-                  <Text style={[styles.speedLabel, { color: colors.textSecondary }]}>Avg. response time</Text>
-                </View>
-                <View style={styles.speedTrend}>
-                  <TrendUp size={16} color={Colors.success} />
-                  <Text style={[styles.speedTrendText, { color: Colors.success }]}>15% faster</Text>
-                </View>
+            {/* ── Recent Anomalies ────────────────────────────────── */}
+            <Animated.View entering={FadeInDown.delay(200).springify().damping(16)}>
+              <View style={styles.section}>
+                <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
+                  Recent Anomalies
+                </Text>
+                {anomalies.length === 0 ? (
+                  <View style={[styles.emptyCard, Shadows.card, { backgroundColor: colors.surface }]}>
+                    <CheckSquare size={28} color={Colors.success} weight="light" />
+                    <Text style={[styles.emptyCardText, { color: colors.textMuted }]}>
+                      No anomalies in the last 7 days
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={[styles.anomalyList, Shadows.card, { backgroundColor: colors.surface }]}>
+                    {anomalies.map((item, index) => (
+                      <AnomalyRow
+                        key={item.id}
+                        item={item}
+                        isLast={index === anomalies.length - 1}
+                        colors={colors}
+                      />
+                    ))}
+                  </View>
+                )}
               </View>
-            </View>
+            </Animated.View>
 
-            {/* ── Recent Alerts List ───────────────────────────────────── */}
-            <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Recent Activity</Text>
-              <CaretRight size={20} color={colors.textMuted} />
-            </View>
-            <View style={styles.list}>
-              <ActivityItem
-                title="Pressure drop at Kilimani East"
-                time="2h ago"
-                type="alert"
-                colors={colors}
-              />
-              <ActivityItem
-                title="New Water Point verified: Langata 4"
-                time="5h ago"
-                type="event"
-                colors={colors}
-              />
-            </View>
+            {/* ── Severity Breakdown ──────────────────────────────── */}
+            {anomalies.length > 0 && (
+              <Animated.View entering={FadeInDown.delay(280).springify().damping(16)}>
+                <View style={styles.section}>
+                  <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Severity Breakdown</Text>
+                  <SeverityBreakdown anomalies={anomalies} colors={colors} />
+                </View>
+              </Animated.View>
+            )}
           </>
         )}
       </ScrollView>
@@ -158,80 +253,282 @@ export default function AnalyticsScreen() {
   );
 }
 
-// ── Sub-components ─────────────────────────────────────────────────────────────
+// ── KPI Card ────────────────────────────────────────────────────────────────────
 
-function MetricCard({ label, value, trend, icon: Icon, color, colors }: any) {
-  const isUp = trend >= 0;
+function KpiCard({
+  label, value, subValue, icon: Icon, color, colors, alert,
+}: {
+  label: string; value: string | number; subValue?: string;
+  icon: any; color: string; colors: any; alert?: boolean;
+}) {
   return (
-    <View style={[styles.metricCard, Shadows.card, { backgroundColor: colors.surface }]}>
-      <View style={[styles.metricIconBg, { backgroundColor: color + '15' }]}>
-        <Icon size={24} color={color} weight="fill" />
+    <View style={[styles.kpiCard, Shadows.card, { backgroundColor: colors.surface }]}>
+      <View style={[styles.kpiIconBg, { backgroundColor: color + '15' }]}>
+        <Icon size={22} color={color} weight="fill" />
       </View>
-      <Text style={[styles.metricValue, { color: colors.textPrimary }]}>{value}</Text>
-      <Text style={[styles.metricLabel, { color: colors.textSecondary }]}>{label}</Text>
-      <View style={styles.trendRow}>
-        {isUp ? <TrendUp size={14} color={Colors.success} /> : <TrendDown size={14} color={Colors.critical} />}
-        <Text style={[styles.trendText, { color: isUp ? Colors.success : Colors.critical }]}>
-          {Math.abs(trend)}% vs last month
+      <Text style={[styles.kpiValue, { color: alert ? color : colors.textPrimary }]}>
+        {value}
+      </Text>
+      {subValue && (
+        <Text style={[styles.kpiSubValue, { color: color }]}>{subValue}</Text>
+      )}
+      <Text style={[styles.kpiLabel, { color: colors.textMuted }]}>{label}</Text>
+    </View>
+  );
+}
+
+// ── Anomaly Row ─────────────────────────────────────────────────────────────────
+
+function AnomalyRow({ item, isLast, colors }: { item: Anomaly; isLast: boolean; colors: any }) {
+  const AnomalyIcon = ANOMALY_ICONS[item.type] ?? ShieldWarning;
+  const typeLabel = ANOMALY_TYPE_LABELS[item.type] ?? item.type.replace(/_/g, ' ');
+  const sevColor =
+    item.severity === 'critical' ? Colors.critical :
+    item.severity === 'warning'  ? Colors.warning  : Colors.info;
+
+  return (
+    <View style={[styles.anomalyRow, !isLast && { borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+      <View style={[styles.anomalyDot, { backgroundColor: sevColor + '20' }]}>
+        <AnomalyIcon size={15} color={sevColor} />
+      </View>
+      <View style={styles.anomalyInfo}>
+        <Text style={[styles.anomalyType, { color: colors.textPrimary }]} numberOfLines={1}>
+          {typeLabel}
+        </Text>
+        <Text style={[styles.anomalyWp, { color: colors.textMuted }]} numberOfLines={1}>
+          {item.water_point_name}
+        </Text>
+      </View>
+      <View style={{ alignItems: 'flex-end', gap: 3 }}>
+        <View style={[styles.sevPill, { backgroundColor: sevColor + '15' }]}>
+          <Text style={[styles.sevText, { color: sevColor }]}>{item.severity}</Text>
+        </View>
+        <Text style={[styles.anomalyTime, { color: colors.textMuted }]}>
+          {timeAgo(item.triggered_at)}
         </Text>
       </View>
     </View>
   );
 }
 
-function ActivityItem({ title, time, type, colors }: any) {
+// ── Severity Breakdown ──────────────────────────────────────────────────────────
+
+function SeverityBreakdown({ anomalies, colors }: { anomalies: Anomaly[]; colors: any }) {
+  const counts = anomalies.reduce(
+    (acc, a) => { acc[a.severity] = (acc[a.severity] ?? 0) + 1; return acc; },
+    {} as Record<string, number>,
+  );
+  const total = anomalies.length;
+  const bars: Array<{ key: string; label: string; color: string; count: number }> = [
+    { key: 'critical', label: 'Critical', color: Colors.critical, count: counts.critical ?? 0 },
+    { key: 'warning',  label: 'Warning',  color: Colors.warning,  count: counts.warning  ?? 0 },
+    { key: 'info',     label: 'Info',     color: Colors.info,     count: counts.info     ?? 0 },
+  ];
+
   return (
-    <View style={[styles.activityItem, { borderBottomColor: colors.border }]}>
-      <View style={[styles.dot, { backgroundColor: type === 'alert' ? Colors.critical : Colors.success }]} />
-      <View style={styles.activityInfo}>
-        <Text style={[styles.activityTitle, { color: colors.textPrimary }]}>{title}</Text>
-        <Text style={[styles.activityTime, { color: colors.textMuted }]}>{time}</Text>
-      </View>
+    <View style={[styles.breakdownCard, Shadows.card, { backgroundColor: colors.surface }]}>
+      {bars.map(bar => (
+        <View key={bar.key} style={styles.breakdownRow}>
+          <Text style={[styles.breakdownLabel, { color: colors.textSecondary }]}>{bar.label}</Text>
+          <View style={[styles.breakdownTrack, { backgroundColor: colors.surfaceSecondary }]}>
+            <View
+              style={[
+                styles.breakdownFill,
+                { width: `${(bar.count / total) * 100}%` as any, backgroundColor: bar.color },
+              ]}
+            />
+          </View>
+          <Text style={[styles.breakdownCount, { color: bar.count > 0 ? bar.color : colors.textMuted }]}>
+            {bar.count}
+          </Text>
+        </View>
+      ))}
     </View>
   );
 }
 
-// ── Styles ─────────────────────────────────────────────────────────────────────
+// ── Styles ──────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingHorizontal: Spacing.lg, marginBottom: Spacing.xl },
-  title: { fontSize: Typography.xxl, fontWeight: Typography.heavy, letterSpacing: -0.5 },
-  subtitle: { fontSize: Typography.sm, marginTop: 4 },
-  
-  metricsRow: { flexDirection: 'row', paddingHorizontal: Spacing.lg, gap: Spacing.md },
-  metricCard: { flex: 1, padding: Spacing.lg, borderRadius: Radii.card, gap: 4 },
-  metricIconBg: { width: 44, height: 44, borderRadius: Radii.md, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-  metricValue: { fontSize: Typography.xl, fontWeight: Typography.heavy },
-  metricLabel: { fontSize: Typography.xs, fontWeight: Typography.medium },
-  trendRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
-  trendText: { fontSize: 10, fontWeight: Typography.bold },
+  loadingCenter: { flex: 1, marginTop: 120, alignItems: 'center' },
 
-  section: { marginTop: Spacing.xl, paddingHorizontal: Spacing.lg, gap: Spacing.md },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: Spacing.xl, paddingHorizontal: Spacing.lg },
-  sectionTitle: { fontSize: Typography.md, fontWeight: Typography.bold },
-  
-  chartPlaceholder: { height: 160, borderRadius: Radii.card, padding: Spacing.md, justifyContent: 'flex-end' },
-  chartBars: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'flex-end', height: '100%' },
-  barWrapper: { alignItems: 'center', gap: 8 },
-  bar: { width: 14, borderRadius: 7 },
-  barLabel: { fontSize: 10, fontWeight: Typography.medium },
+  header: {
+    paddingHorizontal: Spacing.lg,
+    marginBottom: Spacing.xl,
+  },
+  title: {
+    fontSize: Typography.xxl,
+    fontWeight: Typography.heavy as any,
+    letterSpacing: -0.5,
+  },
+  subtitle: {
+    fontSize: Typography.sm,
+    marginTop: 2,
+  },
 
-  speedCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: Spacing.lg, borderRadius: Radii.card },
-  speedInfo: { gap: 2 },
-  speedValue: { fontSize: Typography.xl, fontWeight: Typography.heavy },
-  speedLabel: { fontSize: Typography.sm, fontWeight: Typography.medium },
-  speedTrend: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: Colors.success + '15', paddingHorizontal: 8, paddingVertical: 4, borderRadius: Radii.pill },
-  speedTrendText: { fontSize: 10, fontWeight: Typography.bold },
+  // KPI grid
+  kpiGrid: {
+    flexDirection: 'row',
+    paddingHorizontal: Spacing.lg,
+    gap: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  kpiCard: {
+    flex: 1,
+    padding: Spacing.lg,
+    borderRadius: Radii.card,
+    gap: 3,
+  },
+  kpiIconBg: {
+    width: 42,
+    height: 42,
+    borderRadius: Radii.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.sm,
+  },
+  kpiValue: {
+    fontSize: Typography.xl,
+    fontWeight: Typography.heavy as any,
+    letterSpacing: -0.5,
+  },
+  kpiSubValue: {
+    fontSize: 11,
+    fontWeight: Typography.bold as any,
+  },
+  kpiLabel: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.medium as any,
+  },
 
-  list: { paddingHorizontal: Spacing.lg, marginTop: Spacing.sm },
-  activityItem: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, paddingVertical: Spacing.md, borderBottomWidth: 1 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  activityInfo: { flex: 1, gap: 2 },
-  activityTitle: { fontSize: Typography.sm, fontWeight: Typography.medium },
-  activityTime: { fontSize: Typography.xs },
+  // Section
+  section: {
+    paddingHorizontal: Spacing.lg,
+    marginBottom: Spacing.xl,
+    gap: Spacing.md,
+  },
+  sectionTitle: {
+    fontSize: Typography.md,
+    fontWeight: Typography.bold as any,
+  },
 
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40, gap: 12 },
-  deniedText: { fontSize: Typography.xl, fontWeight: Typography.bold },
-  deniedSub: { fontSize: Typography.sm, textAlign: 'center' },
+  // Health card
+  healthCard: {
+    borderRadius: Radii.card,
+    padding: Spacing.lg,
+    gap: Spacing.sm,
+  },
+  healthHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: Spacing.sm,
+  },
+  healthPct: {
+    fontSize: 32,
+    fontWeight: Typography.heavy as any,
+    letterSpacing: -1,
+  },
+  healthLabel: {
+    fontSize: Typography.base,
+    fontWeight: Typography.medium as any,
+  },
+  progressTrack: {
+    height: 8,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  healthSub: {
+    fontSize: Typography.xs,
+  },
+
+  // Anomaly list
+  emptyCard: {
+    borderRadius: Radii.card,
+    padding: Spacing.xl,
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  emptyCardText: {
+    fontSize: Typography.sm,
+    textAlign: 'center',
+  },
+  anomalyList: {
+    borderRadius: Radii.card,
+    overflow: 'hidden',
+  },
+  anomalyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.md,
+    gap: Spacing.sm,
+  },
+  anomalyDot: {
+    width: 34,
+    height: 34,
+    borderRadius: Radii.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  anomalyInfo: { flex: 1, gap: 2 },
+  anomalyType: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.bold as any,
+  },
+  anomalyWp: {
+    fontSize: Typography.xs,
+  },
+  sevPill: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: Radii.pill,
+  },
+  sevText: {
+    fontSize: 9,
+    fontWeight: Typography.bold as any,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  anomalyTime: {
+    fontSize: 10,
+  },
+
+  // Severity breakdown
+  breakdownCard: {
+    borderRadius: Radii.card,
+    padding: Spacing.lg,
+    gap: Spacing.md,
+  },
+  breakdownRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  breakdownLabel: {
+    width: 58,
+    fontSize: Typography.xs,
+    fontWeight: Typography.medium as any,
+  },
+  breakdownTrack: {
+    flex: 1,
+    height: 8,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  breakdownFill: {
+    height: '100%',
+    borderRadius: 4,
+    minWidth: 4,
+  },
+  breakdownCount: {
+    width: 20,
+    fontSize: Typography.xs,
+    fontWeight: Typography.bold as any,
+    textAlign: 'right',
+  },
 });

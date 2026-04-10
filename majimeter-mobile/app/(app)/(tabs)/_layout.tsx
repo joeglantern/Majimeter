@@ -2,7 +2,7 @@
 // Custom floating tab bar — the spine of the main app navigation.
 // Role-Intelligent: shows different tabs depending on user.role.
 
-import { Tabs, useRouter } from 'expo-router';
+import { Tabs, useRouter, usePathname } from 'expo-router';
 import { View, Text, Pressable, StyleSheet, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -48,8 +48,8 @@ export default function TabsLayout() {
 
   return (
     <Tabs
-      tabBar={props => (
-        <FloatingTabBar {...props} tabs={tabs} colors={colors} insets={insets} />
+      tabBar={() => (
+        <FloatingTabBar tabs={tabs} colors={colors} insets={insets} />
       )}
       screenOptions={{ headerShown: false }}
     >
@@ -67,18 +67,17 @@ export default function TabsLayout() {
 // ── Floating Tab Bar ───────────────────────────────────────────────────────────
 
 function FloatingTabBar({
-  state,
-  navigation,
   tabs,
   colors,
   insets,
 }: {
-  state: any;
-  navigation: any;
   tabs: TabItem[];
   colors: ReturnType<typeof useTheme>['colors'];
   insets: ReturnType<typeof useSafeAreaInsets>;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
+
   return (
     <View
       style={[
@@ -93,26 +92,20 @@ function FloatingTabBar({
           { backgroundColor: colors.surface },
         ]}
       >
-        {tabs.map((tab, index) => {
-          const routeIndex = state.routes.findIndex((r: any) => r.name === tab.name);
-          const isFocused = state.index === routeIndex;
-
-          const onPress = () => {
-            const event = navigation.emit({
-              type: 'tabPress',
-              target: state.routes[routeIndex]?.key,
-              canPreventDefault: true,
-            });
-            if (!isFocused && !event.defaultPrevented && routeIndex !== -1) {
-              navigation.navigate(state.routes[routeIndex].name);
-            }
-          };
+        {tabs.map((tab) => {
+          // Expo Router strips group segments — /map, /reports, etc.
+          const strippedPath = tab.name === 'index' ? '/' : `/${tab.name}`;
+          // Full path used for navigation to avoid ambiguity
+          const fullPath = tab.name === 'index'
+            ? '/(app)/(tabs)'
+            : `/(app)/(tabs)/${tab.name}`;
+          const isFocused = pathname === strippedPath;
 
           return (
             <Pressable
               key={tab.name}
               style={styles.tabItem}
-              onPress={onPress}
+              onPress={() => router.navigate(fullPath as any)}
               accessibilityRole="tab"
               accessibilityLabel={tab.label}
               accessibilityState={isFocused ? { selected: true } : {}}

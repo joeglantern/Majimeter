@@ -1,16 +1,44 @@
 // useTheme.ts
-// Returns the correct color set based on the user's current color scheme.
-// Components import this hook instead of importing Colors directly.
+// Returns the correct color set based on the active color scheme.
+// ThemeProvider must wrap the app to enable toggleTheme.
 
+import React, { createContext, useContext, useState } from 'react';
 import { useColorScheme } from 'react-native';
 import { Colors } from '@/constants/Theme';
 
+// ── Theme context ─────────────────────────────────────────────────────────────
+
+type ThemeOverride = 'light' | 'dark' | null;
+
+const ThemeContext = createContext<{
+  override: ThemeOverride;
+  toggleTheme: () => void;
+}>({ override: null, toggleTheme: () => {} });
+
+// ── Provider ──────────────────────────────────────────────────────────────────
+
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const system = useColorScheme();
+  const [override, setOverride] = useState<ThemeOverride>(null);
+
+  const toggleTheme = () => {
+    const current = override ?? system;
+    setOverride(current === 'dark' ? 'light' : 'dark');
+  };
+
+  return React.createElement(ThemeContext.Provider, { value: { override, toggleTheme } }, children);
+}
+
+// ── Hook ──────────────────────────────────────────────────────────────────────
+
 export function useTheme() {
-  const scheme = useColorScheme(); // 'light' | 'dark' | null
-  const isDark = scheme === 'dark';
+  const scheme = useColorScheme();
+  const { override, toggleTheme } = useContext(ThemeContext);
+  const isDark = override !== null ? override === 'dark' : scheme === 'dark';
 
   return {
     isDark,
+    toggleTheme,
     colors: {
       primary: Colors.primary,
       primaryLight: Colors.primaryLight,

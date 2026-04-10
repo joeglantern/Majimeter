@@ -9,12 +9,14 @@ export class WaterPointService {
   constructor(private readonly db: Sql) {}
 
   async list(filters: {
+    q?: string
     lat?: number
     lng?: number
     radius?: number // km
     status?: WaterPointStatus
+    limit?: number
   }) {
-    const { lat, lng, radius, status } = filters
+    const { q, lat, lng, radius, status, limit = 100 } = filters
 
     const geoFilter =
       lat != null && lng != null && radius != null
@@ -30,14 +32,19 @@ export class WaterPointService {
       ? this.db`AND status = ${status}::water_point_status`
       : this.db``
 
+    const searchFilter = q
+      ? this.db`AND (name ILIKE ${'%' + q + '%'} OR COALESCE(address, '') ILIKE ${'%' + q + '%'})`
+      : this.db``
+
     return this.db<WaterPointRow[]>`
       SELECT id, name, type, location_lat, location_lng, address, status, sensor_id, created_at, updated_at
       FROM   water_points
       WHERE  TRUE
       ${geoFilter}
       ${statusFilter}
+      ${searchFilter}
       ORDER  BY name
-      LIMIT  100
+      LIMIT  ${limit}
     `
   }
 

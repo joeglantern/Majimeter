@@ -39,10 +39,12 @@ export const listWaterPointsSchema = {
     type: 'object',
     additionalProperties: false,
     properties: {
+      q:      { type: 'string', minLength: 1, maxLength: 100 },
       lat:    { type: 'number' },
       lng:    { type: 'number' },
       radius: { type: 'number', minimum: 0.1, maximum: 500 }, // km
       status: { type: 'string', enum: ['active', 'inactive', 'maintenance'] },
+      limit:  { type: 'number', minimum: 1, maximum: 100, default: 100 },
     },
   },
 } as const

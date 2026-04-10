@@ -36,10 +36,12 @@ import { getSensorsSocket } from '@/lib/socket';
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface Summary {
-  activePoints: number;
-  openReports: number;
-  activeAlerts: number;
-  totalReadingsToday: number;
+  active_water_points: number;
+  total_water_points: number;
+  open_reports: number;
+  active_alerts: number;
+  critical_alerts: number;
+  readings_today: number;
 }
 
 interface WaterPoint {
@@ -86,7 +88,7 @@ export default function DashboardScreen() {
   // Bell badge pulse
   const bellPulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
-    if ((summary?.activeAlerts ?? 0) > 0) {
+    if ((summary?.active_alerts ?? 0) > 0) {
       Animated.loop(
         Animated.sequence([
           Animated.timing(bellPulse, { toValue: 1.2, duration: 600, useNativeDriver: true }),
@@ -94,7 +96,7 @@ export default function DashboardScreen() {
         ])
       ).start();
     }
-  }, [summary?.activeAlerts]);
+  }, [summary?.active_alerts]);
 
   // ── Data fetch ───────────────────────────────────────────────────────────────
 
@@ -102,7 +104,7 @@ export default function DashboardScreen() {
     try {
       const [summaryRes, pointsRes] = await Promise.all([
         api.get<{ success: boolean; data: Summary }>('/analytics/summary'),
-        api.get<{ success: boolean; data: WaterPoint[] }>('/water-points?limit=10'),
+        api.get<{ success: boolean; data: WaterPoint[] }>('/water-points', { params: { limit: 10 } }),
       ]);
       setSummary(summaryRes.data.data);
       setWaterPoints(pointsRes.data.data ?? []);
@@ -183,14 +185,14 @@ export default function DashboardScreen() {
             <Animated.View style={{ transform: [{ scale: bellPulse }] }}>
               <BellRinging
                 size={22}
-                color={(summary?.activeAlerts ?? 0) > 0 ? Colors.critical : colors.textSecondary}
-                weight={(summary?.activeAlerts ?? 0) > 0 ? 'fill' : 'regular'}
+                color={(summary?.active_alerts ?? 0) > 0 ? Colors.critical : colors.textSecondary}
+                weight={(summary?.active_alerts ?? 0) > 0 ? 'fill' : 'regular'}
               />
             </Animated.View>
-            {(summary?.activeAlerts ?? 0) > 0 && (
+            {(summary?.active_alerts ?? 0) > 0 && (
               <View style={styles.bellBadge}>
                 <Text style={styles.bellBadgeText}>
-                  {(summary?.activeAlerts ?? 0) > 9 ? '9+' : summary?.activeAlerts}
+                  {(summary?.active_alerts ?? 0) > 9 ? '9+' : summary?.active_alerts}
                 </Text>
               </View>
             )}
@@ -203,7 +205,7 @@ export default function DashboardScreen() {
         ) : (
           <View style={styles.kpiRow}>
             <KPICard
-              value={summary?.activePoints ?? 0}
+              value={summary?.active_water_points ?? 0}
               label="Active Points"
               color={Colors.success}
               bgColor={Colors.successLight}
@@ -211,7 +213,7 @@ export default function DashboardScreen() {
               colors={colors}
             />
             <KPICard
-              value={summary?.activeAlerts ?? 0}
+              value={summary?.active_alerts ?? 0}
               label="Alerts"
               color={Colors.critical}
               bgColor={Colors.criticalLight}
@@ -219,7 +221,7 @@ export default function DashboardScreen() {
               colors={colors}
             />
             <KPICard
-              value={summary?.openReports ?? 0}
+              value={summary?.open_reports ?? 0}
               label="Reports"
               color={Colors.warning}
               bgColor={Colors.warningLight}
@@ -270,19 +272,19 @@ export default function DashboardScreen() {
             <View style={styles.adminRow}>
               <AdminStat
                 label="Readings"
-                value={summary.totalReadingsToday}
+                value={summary.readings_today}
                 icon={<Lightning size={16} color={Colors.primary} weight="fill" />}
                 colors={colors}
               />
               <AdminStat
                 label="Open Reports"
-                value={summary.openReports}
+                value={summary.open_reports}
                 icon={<WarningCircle size={16} color={Colors.warning} weight="fill" />}
                 colors={colors}
               />
               <AdminStat
                 label="Network Health"
-                value={`${Math.round((summary.activePoints / Math.max((summary.activePoints + 2), 1)) * 100)}%`}
+                value={`${Math.round((summary.active_water_points / Math.max(summary.total_water_points, 1)) * 100)}%`}
                 icon={<Gauge size={16} color={Colors.success} weight="fill" />}
                 colors={colors}
               />

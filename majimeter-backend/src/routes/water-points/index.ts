@@ -16,13 +16,13 @@ export default async function waterPointRoutes(fastify: FastifyInstance) {
 
   // GET /api/v1/water-points
   fastify.get<{
-    Querystring: { lat?: number; lng?: number; radius?: number; status?: WaterPointStatus }
+    Querystring: { q?: string; lat?: number; lng?: number; radius?: number; status?: WaterPointStatus; limit?: number }
   }>(
     '/',
     { schema: listWaterPointsSchema, preHandler: [fastify.authenticate] },
     async (req, reply) => {
-      const { lat, lng, radius, status } = req.query
-      const data = await svc.list({ lat, lng, radius, status })
+      const { q, lat, lng, radius, status, limit } = req.query
+      const data = await svc.list({ q, lat, lng, radius, status, limit })
       return reply.send(ok(data))
     },
   )
